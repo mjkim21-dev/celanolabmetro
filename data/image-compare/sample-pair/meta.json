@@ -1,8 +1,0 @@
-{
-  "title": "Sample pair",
-  "description": "Drag the divider to reveal more of either side. Replace these two placeholder images with your own before/after pair.",
-  "before_label": "Before",
-  "after_label": "After",
-  "before_ext": "svg",
-  "after_ext": "svg"
-}
