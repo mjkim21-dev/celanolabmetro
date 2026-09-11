@@ -1,5 +1,0 @@
-[
-  { "slug": "welcome",        "title": "Welcome",            "file": "10-welcome.md" },
-  { "slug": "add-a-doc",      "title": "Add a doc",          "file": "20-add-a-doc.md" },
-  { "slug": "image-compare",  "title": "Image Compare pairs","file": "30-image-compare.md" }
-]
