@@ -36,10 +36,10 @@ Zero metadata needed. Works with *any* two images.
 
 Under the hood, this is a similarity transform in frame-normalized coordinates:
 
-```
+``
 scale = |b2 - b1| / |a2 - a1|
 shift = mid_b - scale * mid_a
-```
+``
 
 ### 3. Manual controls (fine-tune)
 
@@ -50,7 +50,7 @@ Use them for last-mile tweaks. **Reset transform** clears everything.
 ## Drag-and-drop upload
 
 1. Click **+ Upload pair** in the tool's toolbar.
-2. Drop or click each dropzone (Before / After) to pick a file. Images stay in
+2. Drop or click each drop zone (Before / After) to pick a file. Images stay in
    your browser — nothing gets uploaded anywhere.
 3. As soon as both are set, the pair loads. Calibrate + adjust as needed.
 
@@ -64,7 +64,7 @@ around for the lab:
 1. Click **Save pair to repo**.
 2. Fill in the id (folder name), title, description, and labels.
 3. The browser downloads a ZIP containing `<id>/before.<ext>`,
-   ``<id>/after.<ext>``, `<id>/meta.json` (with the transform baked in), and a
+   `<id>/after.<ext>`, `<id>/meta.json` (with the transform baked in), and a
    short `README.md`.
 4. Unzip it into `data/image-compare/` so you end up with
    `data/image-compare/<id>/`.
