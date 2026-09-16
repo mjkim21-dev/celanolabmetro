@@ -34,7 +34,7 @@ Zero metadata needed. Works with *any* two images.
 5. Done — the tool solves for the scale + offset that maps the after image
    onto the before image and applies it.
 
-Under the hood this is a similarity transform in frame-normalized coordinates:
+Under the hood, this is a similarity transform in frame-normalized coordinates:
 
 ```
 scale = |b2 - b1| / |a2 - a1|
@@ -47,12 +47,12 @@ Below the slider there are numeric inputs for **Scale**, **X offset (%)**, and
 **Y offset (%)** that always work on top of whatever the other two methods set.
 Use them for last-mile tweaks. **Reset transform** clears everything.
 
-## Drag-drop upload
+## Drag-and-drop upload
 
 1. Click **+ Upload pair** in the tool's toolbar.
 2. Drop or click each dropzone (Before / After) to pick a file. Images stay in
    your browser — nothing gets uploaded anywhere.
-3. As soon as both are set the pair loads. Calibrate + adjust as needed.
+3. As soon as both are set, the pair loads. Calibrate + adjust as needed.
 
 Supported extensions: `png`, `jpg`, `jpeg`, `webp`, `gif`, `svg`, `bmp`.
 
@@ -64,7 +64,7 @@ around for the lab:
 1. Click **Save pair to repo**.
 2. Fill in the id (folder name), title, description, and labels.
 3. The browser downloads a ZIP containing `<id>/before.<ext>`,
-   `<id>/after.<ext>`, `<id>/meta.json` (with the transform baked in), and a
+   ``<id>/after.<ext>``, `<id>/meta.json` (with the transform baked in), and a
    short `README.md`.
 4. Unzip it into `data/image-compare/` so you end up with
    `data/image-compare/<id>/`.
