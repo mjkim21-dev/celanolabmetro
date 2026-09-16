@@ -43,16 +43,28 @@ main { animation: fadeIn 180ms ease-out; }
   border-bottom: 1px solid rgba(140, 29, 64, 0.35);
 }
 .prose a:hover { border-bottom-color: #8c1d40; }
-.prose code {
+.prose :not(pre) > code {
   background: #f7f7f8;
+  color: #6c1531;
   padding: 0.1rem 0.35rem;
   border-radius: 4px;
   font-weight: 500;
 }
+
 .prose pre {
   background: #141519;
   color: #f7f7f8;
   border-radius: 10px;
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+.prose pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+  font-weight: inherit;
 }
 
 /* Doc sidebar active */
