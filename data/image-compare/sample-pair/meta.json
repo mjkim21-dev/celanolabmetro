@@ -1,8 +1,0 @@
-{
-  "title": "Sample pair",
-  "description": "Drag the divider to reveal more of either side. Replace these two placeholder images with your own trace/retrace pair.",
-  "before_label": "Trace",
-  "after_label": "Retrace",
-  "before_ext": "svg",
-  "after_ext": "svg"
-}
