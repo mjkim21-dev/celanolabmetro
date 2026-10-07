@@ -3,22 +3,8 @@
 Internal working site for the **Nanoelectronics Metrology & Failure Analysis
 Lab** at ASU. Pure static HTML/CSS/JS. No server, no build step, no install.
 
-- Hosted for free on **GitHub Pages**.
-- Docs are plain Markdown files in `docs/`.
 - Tools are small JavaScript widgets in `assets/app.js`. First one is an image
   compare slider.
-
-## Publish it (one-time, ~2 minutes)
-
-1. Push this folder to a GitHub repo (a fresh empty repo is fine).
-2. On GitHub go to **Settings → Pages**.
-3. Under "Build and deployment":
-   - **Source:** Deploy from a branch
-   - **Branch:** `main` / `(root)`
-4. Save. Wait a minute. Your site is live at
-   `https://<your-username>.github.io/<repo-name>/`.
-
-That URL is what you share with the lab. Every push to `main` updates it.
 
 ## Add a doc
 
@@ -71,17 +57,3 @@ celanolabmetro/
   .gitignore
 ```
 
-## Previewing locally (optional)
-
-Opening `index.html` by double-click loads the docs from
-`assets/embedded-files.js`, because browsers block `fetch()` on `file://`.
-A local server reads the Markdown files directly, which is what you want
-after adding a new doc. Two easy ways to preview before pushing:
-
-- **VS Code**: install the "Live Server" extension → right-click `index.html`
-  → "Open with Live Server".
-- **Any Python install**: `python -m http.server 8000` in this folder, then
-  open <http://localhost:8000>.
-
-Neither of these is needed to *use* the site — pushing to GitHub Pages is the
-normal flow.
