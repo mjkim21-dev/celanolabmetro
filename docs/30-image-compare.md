@@ -1,18 +1,40 @@
-# Image Compare pairs
+# Image Compare
 
-The [Image Compare tool](#/tools/image-compare) lets you drag a slider across
-two aligned images to reveal each side. You can either load a pair from the
-repo or drop in two images from your machine on the fly.
+The [Image Compare tool](#/tools/image-compare) is a trace / retrace slider.
+Drag the divider to reveal either scan. Load a pair saved in the repo, or
+drop two images in from your machine. Nothing you drop in is uploaded.
 
-## Three ways to align images at the same scale
+The left image is **trace**. The right image is **retrace**.
 
-Different scans often have different fields of view (500 nm vs 2 μm, say).
-The tool has three ways to make them match, in order of ease:
+## How the panel shows the two scans
 
-### 1. Auto-scale from metadata (best for shared pairs)
+Each image keeps its real aspect ratio. A square scan stays square. The
+frame is the box that fits both pictures, so neither one is cropped.
 
-If you record scan sizes in `meta.json`, the tool auto-scales the after image
-so the two share the same nm/px:
+**Trace width (nm)** and **Retrace width (nm)** are the horizontal field of
+view. Enter both under the slider, or store them in `meta.json`. The panel
+then draws both scans so one nanometer is the same length on screen. The
+smaller field of view sits inside the larger one, with the gray panel
+showing in the margin. Height follows each image’s own pixel aspect ratio
+(square pixels).
+
+With both widths set, **Scale 1** means that match is already applied.
+**X offset (%)** is a percent of the trace image’s width. **Y offset (%)**
+is a percent of its height. **Reset transform** clears the scale and the
+offsets. It does not clear the scan widths.
+
+If the widths are blank, both images are shown at the same displayed width,
+each with its real aspect ratio. Use the width fields or **Calibrate scale**
+when the fields of view differ.
+
+Example: a 500 nm trace and a 2000 nm retrace. The retrace image is drawn
+four times as wide as the trace, and the trace sits in the middle of it.
+
+## Three ways to line the scans up
+
+### 1. Scan widths
+
+Best when you know the field of view.
 
 ```json
 {
@@ -21,52 +43,46 @@ so the two share the same nm/px:
 }
 ```
 
-### 2. Two-point calibration (best for ad-hoc comparisons)
+`before_scan_size_nm` is the trace width. `after_scan_size_nm` is the
+retrace width. The names stay `before` / `after` in the file. The labels on
+screen are Trace and Retrace.
 
-Zero metadata needed. Works with *any* two images.
+### 2. Two-point calibration
 
-1. Load a pair (repo or drag-drop).
+Best when you do not have scan widths. Works with any two images.
+
+1. Load a pair.
 2. Click **Calibrate scale**.
-3. The slider swings to show only the BEFORE image. Click **two points** on it
-   — either two corresponding features, or two ends of the scale bar.
-4. The slider swings to show only the AFTER image. Click **the same two
-   points** you picked on before.
-5. Done — the tool solves for the scale + offset that maps the after image
-   onto the before image and applies it.
+3. The slider shows only the trace. Click **two points** on it — the same
+   feature on each, or the two ends of the scale bar.
+4. The slider shows only the retrace. Click **the same two points**.
+5. The tool scales the retrace so those distances match, then shifts it so
+   the midpoints line up.
 
-Under the hood, this is a similarity transform in frame-normalized coordinates:
+Clicks that miss the picture are ignored. Calibration replaces the scale and
+offsets. It does not change the scan widths. If widths are already set, the
+new scale is an extra nudge on top of that match.
 
-``
-scale = |b2 - b1| / |a2 - a1|
-shift = mid_b - scale * mid_a
-``
+### 3. Manual controls
 
-### 3. Manual controls (fine-tune)
+**Scale**, **X offset (%)**, and **Y offset (%)** sit under the slider.
+Use them for a last small adjustment after the widths or the calibration.
 
-Below the slider there are numeric inputs for **Scale**, **X offset (%)**, and
-**Y offset (%)** that always work on top of whatever the other two methods set.
-Use them for last-mile tweaks. **Reset transform** clears everything.
+## Upload a pair
 
-## Drag-and-drop upload
+1. Click **+ Upload pair**.
+2. Drop or click the **Trace** and **Retrace** zones.
+3. The pair loads as soon as both files are set.
 
-1. Click **+ Upload pair** in the tool's toolbar.
-2. Drop or click each drop zone (Before / After) to pick a file. Images stay in
-   your browser — nothing gets uploaded anywhere.
-3. As soon as both are set, the pair loads. Calibrate + adjust as needed.
-
-Supported extensions: `png`, `jpg`, `jpeg`, `webp`, `gif`, `svg`, `bmp`.
+Supported files: `png`, `jpg`, `jpeg`, `webp`, `gif`, `svg`, `bmp`.
 
 ## Save a pair to the repo
 
-Once you have a pair loaded (and optionally calibrated) that you want to keep
-around for the lab:
-
 1. Click **Save pair to repo**.
 2. Fill in the id (folder name), title, description, and labels.
-3. The browser downloads a ZIP containing `<id>/before.<ext>`,
-   `<id>/after.<ext>`, `<id>/meta.json` (with the transform baked in), and a
-   short `README.md`.
-4. Unzip it into `data/image-compare/` so you end up with
+3. The browser downloads a ZIP with `<id>/before.<ext>`, `<id>/after.<ext>`,
+   `<id>/meta.json`, and a short `README.md`.
+4. Unzip it into `data/image-compare/` so the folder is
    `data/image-compare/<id>/`.
 5. Add the id to `data/image-compare/manifest.json`:
 
@@ -74,38 +90,38 @@ around for the lab:
    ["sample-pair", "<id>"]
    ```
 
-6. Commit and push. Anyone opening the tool will see your new pair with the
-   transform already applied.
+6. Commit and push. The pair opens with the saved scale and offsets.
 
-## meta.json — full field reference
+On disk the images are still named `before` and `after`. That is the folder
+layout. The labels you typed are what the slider shows.
 
-All fields are optional except when noted. Anything missing gets a sensible
-default.
+## meta.json
+
+Every field can be omitted. Missing labels become Trace and Retrace.
 
 ```json
 {
   "title": "Tip A vs Tip B on Sample 12",
   "description": "Same 5 nN setpoint, 512x512 px.",
-  "before_label": "Tip A",
-  "after_label": "Tip B",
+  "before_label": "Trace",
+  "after_label": "Retrace",
   "before_ext": "png",
   "after_ext": "png",
   "before_scan_size_nm": 500,
   "after_scan_size_nm": 2000,
-  "transform": { "scale": 4.0, "tx": 0.05, "ty": -0.02 }
+  "transform": { "scale": 1.02, "tx": 0.05, "ty": -0.02 }
 }
 ```
 
-- `before_ext` / `after_ext` — file extensions of `before.*` / `after.*`.
-  Default `svg`. Set to match your files.
-- `before_scan_size_nm` / `after_scan_size_nm` — physical scan size. If both
-  are present the initial scale is set automatically.
-- `transform` — saved after-image transform in frame-normalized units. Takes
-  priority over the auto-scale from scan sizes.
+- `before_ext` / `after_ext` — extensions of `before.*` and `after.*`.
+  Default `svg`.
+- `before_scan_size_nm` / `after_scan_size_nm` — trace and retrace widths,
+  in nanometers.
+- `transform` — extra scale and offset on top of the scan-width match.
+  `scale` 1 and offsets 0 means the widths stand alone. `tx` is a fraction
+  of the trace width. `ty` is a fraction of the trace height.
 
 ## Notes
 
-- Both images should ideally share the same aspect ratio.
-- Very large files bloat the git repo. Downsample to a reasonable resolution
-  (a few thousand pixels on the long edge is plenty for slider viewing) before
-  saving.
+- Very large files bloat the git repo. A few thousand pixels on the long
+  edge is enough for the slider.

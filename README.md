@@ -73,8 +73,10 @@ celanolabmetro/
 
 ## Previewing locally (optional)
 
-Because browsers block `fetch()` on `file://`, opening `index.html` by
-double-click will not load the docs. Two easy ways to preview before pushing:
+Opening `index.html` by double-click loads the docs from
+`assets/embedded-files.js`, because browsers block `fetch()` on `file://`.
+A local server reads the Markdown files directly, which is what you want
+after adding a new doc. Two easy ways to preview before pushing:
 
 - **VS Code**: install the "Live Server" extension → right-click `index.html`
   → "Open with Live Server".

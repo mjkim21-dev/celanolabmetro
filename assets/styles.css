@@ -95,6 +95,13 @@ main { animation: fadeIn 180ms ease-out; }
 
 /* ---------- Image Compare tool ---------- */
 
+/* Frame width follows the pair's aspect ratio, capped so a tall scan
+   doesn't run off the page. --slider-aspect is width / height. */
+.slider-frame {
+  width: min(100%, calc(72vh * var(--slider-aspect, 1.7778)));
+  aspect-ratio: var(--slider-aspect, 1.7778);
+}
+
 /* Drop zone */
 .dropzone {
   transition: border-color 140ms ease, background-color 140ms ease;

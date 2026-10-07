@@ -33,13 +33,27 @@ const h = (tag, attrs = {}, children = []) => {
   return el;
 };
 
+function embeddedFile(path) {
+  const bag = window.__EMBEDDED_FILES__;
+  if (!bag || bag[path] == null) return null;
+  return bag[path];
+}
+
 async function loadJSON(path) {
-  const res = await fetch(path, { cache: "no-cache" });
-  if (!res.ok) throw new Error(`${path}: ${res.status} ${res.statusText}`);
-  return res.json();
+  const text = await loadText(path);
+  return JSON.parse(text);
 }
 
 async function loadText(path) {
+  // Opening index.html directly (file://) blocks fetch(). The pages are
+  // copied into assets/embedded-files.js for that case.
+  if (location.protocol === "file:") {
+    const cached = embeddedFile(path);
+    if (cached != null) return cached;
+    throw new Error(
+      `${path}: the browser blocked this read because the page was opened as a file.`
+    );
+  }
   const res = await fetch(path, { cache: "no-cache" });
   if (!res.ok) throw new Error(`${path}: ${res.status} ${res.statusText}`);
   return res.text();
@@ -59,7 +73,7 @@ const TOOLS = [
   {
     id: "image-compare",
     name: "Image Compare",
-    summary: "Drag-to-reveal before / after slider for two aligned images.",
+    summary: "Drag-to-reveal trace / retrace slider for two aligned images.",
     status: "ready",
     description:
       "Compare pairs of images side by side with a draggable divider. Drop " +
@@ -101,7 +115,7 @@ function Header(current) {
             h("span", {
               class:
                 "inline-flex items-center justify-center w-8 h-8 rounded-md bg-maroon-700 text-white font-bold text-sm shadow-sm group-hover:shadow transition-shadow",
-              html: "M",
+              html: "C",
             }),
             h("span", { class: "font-semibold text-ink-900 tracking-tight" }, [
               "Celano Lab ",
@@ -521,23 +535,23 @@ function GenericToolDetail(t) {
 // Features:
 //   - Load pairs from data/image-compare/ (via manifest.json + meta.json)
 //   - OR drag-drop / click-to-upload before + after images from disk
-//   - Apply a similarity transform (scale + translation) to the AFTER image
-//     so it lines up with the BEFORE image. Three ways to set the transform:
-//       1. From metadata: meta.json may include before_scan_size_nm /
-//          after_scan_size_nm. If both are present the initial scale is
-//          set automatically so the two images have the same nm/px.
-//       2. 2-point calibration: user clicks 2 points on BEFORE then 2
-//          corresponding points on AFTER. The tool solves for the scale +
-//          translation that maps A onto B.
-//       3. Manual controls: numeric inputs for scale + x/y offset (frame %).
-//   - Save the current pair (images + meta.json + baked-in transform) as a
-//     ZIP the browser downloads. Unzip into data/image-compare/ + commit.
+//   - Each image keeps its real aspect ratio. The frame fits both, so a
+//     square scan is not cropped into 16:9.
+//   - Shared physical scale: before_scan_size_nm / after_scan_size_nm are
+//     the image widths. When both are set, 1 nm is the same length on both
+//     images and the smaller field of view sits inside the larger one.
+//   - An extra similarity transform (scale + translation) nudges the AFTER
+//     image on top of that match. Three ways to set it:
+//       1. Scan widths (metadata or the nm inputs).
+//       2. 2-point calibration: 2 points on BEFORE, then the same 2 on AFTER.
+//       3. Manual controls: scale + x/y offset (fractions of the before image).
+//   - Save the current pair (images + meta.json + transform) as a ZIP.
 //
-// The transform is stored as {scale, tx, ty} where tx / ty are in
-// frame-normalized units (fractions of the frame's width/height, offsetting
-// the after image from center). Applied as CSS:
-//   transform: translate(tx*100%, ty*100%) scale(scale)
-// with transform-origin at 50% 50% (default).
+// World units: the before image's width is 1. tx is a fraction of that
+// width, ty a fraction of the before height, both offsetting the after
+// image's center from the before image's center. scale multiplies the
+// after size (1 = the scan-width match, or the same displayed width when
+// scan widths are unknown).
 
 const TOOL_RENDERERS = {
   "image-compare": renderImageCompare,
@@ -547,36 +561,89 @@ const IMAGE_EXTS = ["png", "jpg", "jpeg", "webp", "gif", "svg", "bmp"];
 
 // ---- transform math -------------------------------------------------------
 
+function positiveOrNull(value) {
+  if (value === "" || value == null) return null;
+  const n = typeof value === "number" ? value : parseFloat(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /**
- * Given 2 point pairs in frame-normalized coords, return {scale, tx, ty}
- * (also frame-normalized) that maps AFTER points onto BEFORE points.
- * Uses translation + uniform scale (no rotation). Over-determined for 2
- * pairs — best-fits by using midpoints for translation and the distance
- * ratio for scale.
+ * Layout both images in a shared world where the before width is 1 and
+ * pixels are square. Scan widths (nm) set the after/before size ratio.
+ * The frame is the bounding box of both, so neither image is cropped.
  *
- *   b1, b2 — clicked points on BEFORE (each {x, y} in [0,1])
- *   a1, a2 — clicked points on AFTER  (each {x, y} in [0,1])
+ * Returns rects {x, y, w, h} in world units (origin at the before center)
+ * plus the frame bounds.
  */
-function solveSimilarity(b1, b2, a1, a2) {
-  const dB = Math.hypot(b2.x - b1.x, b2.y - b1.y);
-  const dA = Math.hypot(a2.x - a1.x, a2.y - a1.y);
+function layoutPair(beforeNat, afterNat, beforeScanNm, afterScanNm, transform) {
+  const t = transform || { scale: 1, tx: 0, ty: 0 };
+  const bw = Math.max(beforeNat.w, 1);
+  const bh = Math.max(beforeNat.h, 1);
+  const aw = Math.max(afterNat.w, 1);
+  const ah = Math.max(afterNat.h, 1);
+
+  const beforeW = 1;
+  const beforeH = bh / bw;
+  const beforeRect = { x: -beforeW / 2, y: -beforeH / 2, w: beforeW, h: beforeH };
+
+  const ratio =
+    beforeScanNm > 0 && afterScanNm > 0 ? afterScanNm / beforeScanNm : 1;
+  const scale = Number.isFinite(t.scale) && t.scale > 0 ? t.scale : 1;
+  const afterW = ratio * scale;
+  const afterH = afterW * (ah / aw);
+  const cx = (t.tx || 0) * beforeW;
+  const cy = (t.ty || 0) * beforeH;
+  const afterRect = { x: cx - afterW / 2, y: cy - afterH / 2, w: afterW, h: afterH };
+
+  const minX = Math.min(beforeRect.x, afterRect.x);
+  const minY = Math.min(beforeRect.y, afterRect.y);
+  const maxX = Math.max(beforeRect.x + beforeRect.w, afterRect.x + afterRect.w);
+  const maxY = Math.max(beforeRect.y + beforeRect.h, afterRect.y + afterRect.h);
+  const bounds = {
+    minX,
+    minY,
+    frameW: Math.max(maxX - minX, 1e-6),
+    frameH: Math.max(maxY - minY, 1e-6),
+  };
+  return { beforeRect, afterRect, bounds };
+}
+
+/**
+ * Map two point pairs, in each image's own 0–1 coordinates, onto a
+ * {scale, tx, ty} that lines the after image up with the before image.
+ * beforeRect / afterRect must be the identity layout (scale 1, no offset)
+ * the user was looking at when they clicked.
+ */
+function solveAlignment(b1, b2, a1, a2, beforeRect, afterRect) {
+  const world = (local, rect) => ({
+    x: rect.x + local.x * rect.w,
+    y: rect.y + local.y * rect.h,
+  });
+  const wb1 = world(b1, beforeRect);
+  const wb2 = world(b2, beforeRect);
+  const dB = Math.hypot(wb2.x - wb1.x, wb2.y - wb1.y);
+  const dA = Math.hypot((a2.x - a1.x) * afterRect.w, (a2.y - a1.y) * afterRect.h);
   const scale = dA > 1e-9 ? dB / dA : 1;
 
-  const midB = { x: (b1.x + b2.x) / 2, y: (b1.y + b2.y) / 2 };
+  const midB = { x: (wb1.x + wb2.x) / 2, y: (wb1.y + wb2.y) / 2 };
   const midA = { x: (a1.x + a2.x) / 2, y: (a1.y + a2.y) / 2 };
-
-  // Desired mapping T(P) = scale * P + shift, with T(midA) = midB.
-  const shift = {
-    x: midB.x - scale * midA.x,
-    y: midB.y - scale * midA.y,
+  const center = {
+    x: midB.x - (midA.x - 0.5) * afterRect.w * scale,
+    y: midB.y - (midA.y - 0.5) * afterRect.h * scale,
   };
-  // Convert from absolute shift to CSS "translate about center" offset:
-  //   T_css(P) = scale*(P - 0.5) + 0.5 + t
-  //   = scale*P + (0.5 - 0.5*scale + t)
-  //   shift = 0.5 - 0.5*scale + t  →  t = shift + 0.5*(scale - 1)
-  const tx = shift.x + 0.5 * (scale - 1);
-  const ty = shift.y + 0.5 * (scale - 1);
-  return { scale, tx, ty };
+  return {
+    scale,
+    tx: center.x / beforeRect.w,
+    ty: center.y / beforeRect.h,
+  };
+}
+
+function describeScale(beforeNm, afterNm) {
+  if (beforeNm && afterNm) {
+    const rel = afterNm / beforeNm;
+    return `Matched to scan width: the retrace image is ${rel.toFixed(2)}× the trace width, so the same distance has the same size. The smaller scan sits inside the larger one. Scale 1 keeps that match.`;
+  }
+  return "Each image keeps its real aspect ratio. Enter both scan widths, or use Calibrate scale, to line up different fields of view.";
 }
 
 // ---- helpers --------------------------------------------------------------
@@ -636,7 +703,7 @@ async function renderImageCompare(tool) {
   const transformPanel = h("div", { class: "mt-4 flex flex-wrap items-end gap-3" });
   container.append(toolbar, uploadPanel, stage, transformPanel);
 
-  stage.append(h("div", { class: "skeleton w-full aspect-video rounded-xl" }));
+  stage.append(h("div", { class: "skeleton w-full min-h-[240px] rounded-xl" }));
 
   // ---- Load repo pairs ---------------------------------------------------
   let repoPairs = [];
@@ -656,8 +723,8 @@ async function renderImageCompare(tool) {
           source: "repo",
           title: meta.title || prettify(id),
           description: meta.description || "",
-          before_label: meta.before_label || "Before",
-          after_label: meta.after_label || "After",
+          before_label: meta.before_label || "Trace",
+          after_label: meta.after_label || "Retrace",
           before_ext: beforeExt,
           after_ext: afterExt,
           before_scan_size_nm: meta.before_scan_size_nm ?? null,
@@ -722,11 +789,11 @@ async function renderImageCompare(tool) {
 
   // ---- Upload panel ------------------------------------------------------
   const uploadState = { before: null, after: null };
-  const beforeZone = FileDropZone("Before", (file) => {
+  const beforeZone = FileDropZone("Trace", (file) => {
     uploadState.before = file;
     maybeLoadUploaded();
   });
-  const afterZone = FileDropZone("After", (file) => {
+  const afterZone = FileDropZone("Retrace", (file) => {
     uploadState.after = file;
     maybeLoadUploaded();
   });
@@ -752,8 +819,8 @@ async function renderImageCompare(tool) {
       source: "upload",
       title: "Uploaded pair",
       description: "",
-      before_label: "Before",
-      after_label: "After",
+      before_label: "Trace",
+      after_label: "Retrace",
       before_ext: extOf(uploadState.before),
       after_ext: extOf(uploadState.after),
       before_scan_size_nm: null,
@@ -777,11 +844,29 @@ async function renderImageCompare(tool) {
   let currentTransform = { scale: 1, tx: 0, ty: 0 };
   let sliderApi = null;
 
+  const beforeScanInput = h("input", {
+    type: "number",
+    step: "any",
+    min: "0",
+    placeholder: "—",
+    class:
+      "num-input text-sm rounded-md border border-ink-200 bg-white px-2 py-1.5 text-ink-900 focus:outline-none focus:ring-2 focus:ring-maroon-500/40 focus:border-maroon-500",
+    title: "Horizontal field of view of the trace image, in nanometers",
+  });
+  const afterScanInput = h("input", {
+    type: "number",
+    step: "any",
+    min: "0",
+    placeholder: "—",
+    class:
+      "num-input text-sm rounded-md border border-ink-200 bg-white px-2 py-1.5 text-ink-900 focus:outline-none focus:ring-2 focus:ring-maroon-500/40 focus:border-maroon-500",
+    title: "Horizontal field of view of the retrace image, in nanometers",
+  });
   const scaleInput = h("input", {
     type: "number",
     step: "0.01",
-    min: "0.05",
-    max: "20",
+    min: "0.001",
+    max: "1000",
     value: "1.00",
     class:
       "num-input text-sm rounded-md border border-ink-200 bg-white px-2 py-1.5 text-ink-900 focus:outline-none focus:ring-2 focus:ring-maroon-500/40 focus:border-maroon-500",
@@ -832,13 +917,34 @@ async function renderImageCompare(tool) {
       input,
     ]);
 
+  const scaleNote = h("p", { class: "w-full text-xs text-ink-500 leading-relaxed" }, describeScale(null, null));
+
   transformPanel.append(
     calibrateBtn,
+    field("Trace width (nm)", beforeScanInput),
+    field("Retrace width (nm)", afterScanInput),
     field("Scale", scaleInput),
     field("X offset (%)", txInput),
     field("Y offset (%)", tyInput),
-    resetBtn
+    resetBtn,
+    scaleNote
   );
+
+  const pushView = () => {
+    const beforeScanNm = positiveOrNull(beforeScanInput.value);
+    const afterScanNm = positiveOrNull(afterScanInput.value);
+    if (currentPair) {
+      currentPair.before_scan_size_nm = beforeScanNm;
+      currentPair.after_scan_size_nm = afterScanNm;
+    }
+    sliderApi &&
+      sliderApi.setView({
+        transform: currentTransform,
+        beforeScanNm,
+        afterScanNm,
+      });
+    scaleNote.textContent = describeScale(beforeScanNm, afterScanNm);
+  };
 
   const applyTransformFromInputs = () => {
     currentTransform = {
@@ -846,9 +952,9 @@ async function renderImageCompare(tool) {
       tx: (parseFloat(txInput.value) || 0) / 100,
       ty: (parseFloat(tyInput.value) || 0) / 100,
     };
-    sliderApi && sliderApi.setTransform(currentTransform);
+    pushView();
   };
-  [scaleInput, txInput, tyInput].forEach((el) =>
+  [scaleInput, txInput, tyInput, beforeScanInput, afterScanInput].forEach((el) =>
     el.addEventListener("input", applyTransformFromInputs)
   );
 
@@ -861,7 +967,7 @@ async function renderImageCompare(tool) {
   const setTransform = (t) => {
     currentTransform = t;
     writeInputsFromTransform(t);
-    sliderApi && sliderApi.setTransform(t);
+    pushView();
   };
 
   resetBtn.addEventListener("click", () => {
@@ -874,7 +980,7 @@ async function renderImageCompare(tool) {
     setTransform({ scale: 1, tx: 0, ty: 0 });
     sliderApi.startCalibration((newTransform) => {
       setTransform(newTransform);
-      toast("Calibrated — after image aligned to before");
+      toast("Calibrated — retrace image aligned to trace");
     });
   });
 
@@ -887,22 +993,18 @@ async function renderImageCompare(tool) {
     sliderApi = api;
     stage.append(node);
 
-    // Initial transform priority:
-    //   1. saved transform in meta.json (if repo pair)
-    //   2. computed from before_scan_size_nm / after_scan_size_nm
-    //   3. identity
+    // Scan widths size the images. A saved transform is an extra nudge
+    // on top of that match (scale 1 = scan widths already agree).
+    beforeScanInput.value =
+      pair.before_scan_size_nm != null ? String(pair.before_scan_size_nm) : "";
+    afterScanInput.value =
+      pair.after_scan_size_nm != null ? String(pair.after_scan_size_nm) : "";
     let initial = { scale: 1, tx: 0, ty: 0 };
     if (pair.transform && typeof pair.transform.scale === "number") {
       initial = {
         scale: pair.transform.scale,
         tx: pair.transform.tx || 0,
         ty: pair.transform.ty || 0,
-      };
-    } else if (pair.before_scan_size_nm && pair.after_scan_size_nm) {
-      initial = {
-        scale: pair.after_scan_size_nm / pair.before_scan_size_nm,
-        tx: 0,
-        ty: 0,
       };
     }
     setTransform(initial);
@@ -927,7 +1029,7 @@ async function renderImageCompare(tool) {
       EmptyState(
         "No pairs yet",
         "Click “+ Upload pair” to load two images from your machine, or drop a pair into data/image-compare/.",
-        "See docs → “Image Compare pairs”."
+        "See docs → “Image Compare”."
       )
     );
     uploadPanel.classList.remove("hidden");
@@ -1004,23 +1106,23 @@ function ImageCompareSlider(pair) {
 
   const beforeImg = h("img", {
     src: pair.before_url,
-    alt: pair.before_label || "Before",
-    class: "block w-full h-full object-cover select-none pointer-events-none",
+    alt: pair.before_label || "Trace",
+    class: "absolute select-none pointer-events-none",
     draggable: "false",
+    style: "object-fit: contain; max-width: none;",
   });
   const afterImg = h("img", {
     src: pair.after_url,
-    alt: pair.after_label || "After",
-    class:
-      "block w-full h-full object-cover select-none pointer-events-none will-change-transform",
+    alt: pair.after_label || "Retrace",
+    class: "absolute select-none pointer-events-none",
     draggable: "false",
-    style: "transform-origin: 50% 50%;",
+    style: "object-fit: contain; max-width: none;",
   });
 
   const topLayer = h(
     "div",
     {
-      class: "absolute inset-0 overflow-hidden will-change-[clip-path]",
+      class: "absolute inset-0 overflow-hidden will-change-[clip-path] bg-ink-100",
       style: "clip-path: inset(0 50% 0 0);",
     },
     beforeImg
@@ -1033,7 +1135,7 @@ function ImageCompareSlider(pair) {
       class:
         "absolute top-3 left-3 z-10 rounded-md bg-black/60 text-white text-xs font-medium px-2 py-1 backdrop-blur-sm",
     },
-    pair.before_label || "Before"
+    pair.before_label || "Trace"
   );
   const afterBadge = h(
     "div",
@@ -1041,7 +1143,7 @@ function ImageCompareSlider(pair) {
       class:
         "absolute top-3 right-3 z-10 rounded-md bg-black/60 text-white text-xs font-medium px-2 py-1 backdrop-blur-sm",
     },
-    pair.after_label || "After"
+    pair.after_label || "Retrace"
   );
 
   const divider = h("div", {
@@ -1100,7 +1202,7 @@ function ImageCompareSlider(pair) {
     "div",
     {
       class:
-        "slider-frame relative w-full rounded-xl overflow-hidden border border-ink-100 bg-ink-100 aspect-video cursor-ew-resize",
+        "slider-frame relative mx-auto rounded-xl overflow-hidden border border-ink-100 bg-ink-100 cursor-ew-resize",
     },
     [
       bottomLayer,
@@ -1173,20 +1275,85 @@ function ImageCompareSlider(pair) {
     setPercent(next);
   });
 
-  // ---- Transform on the AFTER image -------------------------------------
-  const setTransform = (t) => {
-    afterImg.style.transform = `translate(${(t.tx * 100).toFixed(3)}%, ${(t.ty * 100).toFixed(3)}%) scale(${t.scale})`;
+  // ---- Shared-scale layout ------------------------------------------------
+  // Images are placed in percentages of the frame. The frame's aspect ratio
+  // is the bounding box of both images, so neither one is cropped.
+
+  let view = {
+    transform: { scale: 1, tx: 0, ty: 0 },
+    beforeScanNm: pair.before_scan_size_nm,
+    afterScanNm: pair.after_scan_size_nm,
   };
+  let nat = null;
+  let layout = null;
+
+  const placeImage = (img, rect, bounds) => {
+    img.style.left = `${((rect.x - bounds.minX) / bounds.frameW) * 100}%`;
+    img.style.top = `${((rect.y - bounds.minY) / bounds.frameH) * 100}%`;
+    img.style.width = `${(rect.w / bounds.frameW) * 100}%`;
+    img.style.height = `${(rect.h / bounds.frameH) * 100}%`;
+  };
+
+  const applyLayout = () => {
+    if (!nat) return;
+    const next = layoutPair(
+      nat.before,
+      nat.after,
+      view.beforeScanNm,
+      view.afterScanNm,
+      view.transform
+    );
+    layout = next;
+    placeImage(beforeImg, next.beforeRect, next.bounds);
+    placeImage(afterImg, next.afterRect, next.bounds);
+    const aspect = next.bounds.frameW / next.bounds.frameH;
+    frame.style.setProperty("--slider-aspect", String(aspect));
+  };
+
+  const setView = (next) => {
+    view = {
+      transform: next.transform || view.transform,
+      beforeScanNm: positiveOrNull(next.beforeScanNm),
+      afterScanNm: positiveOrNull(next.afterScanNm),
+    };
+    applyLayout();
+  };
+
+  const readNat = (img) =>
+    new Promise((resolve) => {
+      const done = () =>
+        resolve({
+          w: img.naturalWidth || 1,
+          h: img.naturalHeight || 1,
+        });
+      if (img.complete && img.naturalWidth) done();
+      else {
+        img.addEventListener("load", done, { once: true });
+        img.addEventListener("error", () => resolve({ w: 1, h: 1 }), { once: true });
+      }
+    });
+  Promise.all([readNat(beforeImg), readNat(afterImg)]).then(([before, after]) => {
+    nat = { before, after };
+    applyLayout();
+  });
 
   // ---- Calibration mode -------------------------------------------------
   //
-  // The user clicks 2 points on BEFORE, then 2 on AFTER. We store clicks in
-  // frame-normalized coords ([0,1] on both axes), then solve for a
-  // similarity transform (scale + translate) that maps the AFTER pair onto
-  // the BEFORE pair.
+  // The user clicks 2 points on BEFORE, then 2 on AFTER. Clicks that miss
+  // the image are ignored. Points are stored in each image's own 0–1 space
+  // so a letterboxed scan still measures the real picture.
 
   let calibClicks = { before: [], after: [] };
   let onCalibrationDone = null;
+
+  const framePointToLocal = (pt, rect, bounds) => {
+    const worldX = bounds.minX + pt.x * bounds.frameW;
+    const worldY = bounds.minY + pt.y * bounds.frameH;
+    return {
+      x: (worldX - rect.x) / rect.w,
+      y: (worldY - rect.y) / rect.h,
+    };
+  };
 
   const clearDots = () => (dotsLayer.innerHTML = "");
   const drawDot = (pt, label, cls) => {
@@ -1202,9 +1369,9 @@ function ImageCompareSlider(pair) {
   };
   const updateCalibHud = () => {
     if (calibClicks.before.length < 2) {
-      calibHud.textContent = `Calibrate: click 2 points on BEFORE (${calibClicks.before.length}/2)`;
+      calibHud.textContent = `Calibrate: click 2 points on TRACE (${calibClicks.before.length}/2)`;
     } else {
-      calibHud.textContent = `Calibrate: click 2 corresponding points on AFTER (${calibClicks.after.length}/2)`;
+      calibHud.textContent = `Calibrate: click 2 corresponding points on RETRACE (${calibClicks.after.length}/2)`;
     }
   };
   const endCalibration = (transform) => {
@@ -1219,27 +1386,33 @@ function ImageCompareSlider(pair) {
   };
 
   const onCalibClick = (ev) => {
-    if (!calibrating) return;
+    if (!calibrating || !layout) return;
+    if (ev.target === cancelCalibBtn) return;
     const rect = frame.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
     const pt = {
       x: (ev.clientX - rect.left) / rect.width,
       y: (ev.clientY - rect.top) / rect.height,
     };
-    if (calibClicks.before.length < 2) {
-      calibClicks.before.push(pt);
+    const onBefore = calibClicks.before.length < 2;
+    const imageRect = onBefore ? layout.beforeRect : layout.afterRect;
+    const local = framePointToLocal(pt, imageRect, layout.bounds);
+    if (local.x < -0.02 || local.x > 1.02 || local.y < -0.02 || local.y > 1.02) return;
+    const clamped = {
+      x: Math.min(1, Math.max(0, local.x)),
+      y: Math.min(1, Math.max(0, local.y)),
+    };
+    if (onBefore) {
+      calibClicks.before.push(clamped);
       drawDot(pt, calibClicks.before.length, "");
-      if (calibClicks.before.length === 2) {
-        // Switch to AFTER view.
-        setPercent(0);
-      }
+      if (calibClicks.before.length === 2) setPercent(0);
     } else if (calibClicks.after.length < 2) {
-      calibClicks.after.push(pt);
+      calibClicks.after.push(clamped);
       drawDot(pt, calibClicks.after.length, "calib-dot--after");
       if (calibClicks.after.length === 2) {
         const [b1, b2] = calibClicks.before;
         const [a1, a2] = calibClicks.after;
-        const transform = solveSimilarity(b1, b2, a1, a2);
-        // Small delay so the user sees the last dot land.
+        const transform = solveAlignment(b1, b2, a1, a2, layout.beforeRect, layout.afterRect);
         setTimeout(() => endCalibration(transform), 250);
         return;
       }
@@ -1263,7 +1436,7 @@ function ImageCompareSlider(pair) {
 
   return {
     node: wrap,
-    api: { set: setPercent, setTransform, startCalibration },
+    api: { set: setPercent, setView, startCalibration },
   };
 }
 
@@ -1296,13 +1469,13 @@ function openSavePairModal(pair, transform) {
   }, pair.description || "");
   const beforeLabelInput = h("input", {
     type: "text",
-    value: pair.before_label || "Before",
+    value: pair.before_label || "Trace",
     class:
       "w-full text-sm rounded-md border border-ink-200 bg-white px-3 py-2 text-ink-900 focus:outline-none focus:ring-2 focus:ring-maroon-500/40 focus:border-maroon-500",
   });
   const afterLabelInput = h("input", {
     type: "text",
-    value: pair.after_label || "After",
+    value: pair.after_label || "Retrace",
     class:
       "w-full text-sm rounded-md border border-ink-200 bg-white px-3 py-2 text-ink-900 focus:outline-none focus:ring-2 focus:ring-maroon-500/40 focus:border-maroon-500",
   });
@@ -1350,8 +1523,8 @@ function openSavePairModal(pair, transform) {
     field("Title", titleInput),
     field("Description", descInput),
     h("div", { class: "grid grid-cols-2 gap-3" }, [
-      field("Before label", beforeLabelInput),
-      field("After label", afterLabelInput),
+      field("Trace label", beforeLabelInput),
+      field("Retrace label", afterLabelInput),
     ]),
     h("div", { class: "mt-5 flex items-center justify-end gap-2" }, [cancelBtn, downloadBtn]),
   ]);
@@ -1371,8 +1544,8 @@ function openSavePairModal(pair, transform) {
     const meta = {
       title: titleInput.value.trim() || prettify(id),
       description: descInput.value.trim(),
-      before_label: beforeLabelInput.value.trim() || "Before",
-      after_label: afterLabelInput.value.trim() || "After",
+      before_label: beforeLabelInput.value.trim() || "Trace",
+      after_label: afterLabelInput.value.trim() || "Retrace",
       before_ext: pair.before_ext,
       after_ext: pair.after_ext,
     };
